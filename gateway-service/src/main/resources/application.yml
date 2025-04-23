@@ -1,0 +1,31 @@
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: user-service
+          uri: http://localhost:8081
+          predicates:
+            - Path=/user-service/**
+          filters:
+            - RewritePath=/user-service/(?<remaining>.*), /${remaining}
+
+        - id: order-service
+          uri: http://localhost:8082
+          predicates:
+            - Path=/order-service/**
+          filters:
+            - RewritePath=/order-service/(?<remaining>.*), /${remaining}
+
+  doc:
+    enabled: true
+    api-docs-path: /v3/api-docs
+    swagger-ui:
+      enabled: true
+      path: /swagger-ui.html
+
+#
+#  security:
+#    oauth2:
+#      resourceserver:
+#        jwt:
+#          issuer-uri: https://tu-issuer-oauth-server.com
