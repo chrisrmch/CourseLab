@@ -16,6 +16,15 @@ spring:
           filters:
             - RewritePath=/order-service/(?<remaining>.*), /${remaining}
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    gateway:
+      access: unrestricted
+
   doc:
     enabled: true
     api-docs-path: /v3/api-docs

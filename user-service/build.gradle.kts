@@ -39,6 +39,11 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+// Configuración para construir imagen con Buildpacks (como el spring-boot-maven-plugin en Maven)
+tasks.named<org.springframework.boot.gradle.tasks.bundling.BootBuildImage>("bootBuildImage") {
+    imageName.set("christianrmch/courselab:users") // Nombre de imagen
+}
+
 tasks.withType<Test> {
     useJUnitPlatform()
 }
