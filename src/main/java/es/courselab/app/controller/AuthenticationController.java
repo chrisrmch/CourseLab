@@ -134,7 +134,7 @@ public class AuthenticationController {
             accountVerificationService.deleteAccountVerificationAndRegisterLog(accountVerification);
             userRepository.save(account);
 
-            String content = "<header>" + "<h1>Courselab</h1>" + "<h2>Mobilitat Accessible</h2>" + "<h4><span>Tu cuenta de usuario </span>" + account.getEmail() + "<span> ha sido activada!</span></h4>" + "</header>";
+            String content = "<header>" + "<h1>Courselab</h1>" + "<h2>Running App</h2>" + "<h4><span>Tu cuenta de usuario </span>" + account.getEmail() + "<span> ha sido activada!</span></h4>" + "</header>";
 
             HttpHeaders responseHeaders = new HttpHeaders();
             responseHeaders.setContentType(MediaType.TEXT_HTML);
