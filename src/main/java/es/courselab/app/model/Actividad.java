@@ -9,6 +9,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Data
@@ -17,12 +18,11 @@ import java.time.LocalDateTime;
 @Builder
 @Table(name = "entrenamiento")
 @Schema(description = "Representa una sesión de entrenamiento realizada por el usuario")
-public class Entrenamiento {
-
+public class Actividad {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Schema(description = "ID del entrenamiento", example = "1")
-    private Long idEntrenamiento;
+    private Long id_actividad;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_usuario", nullable = false)
@@ -34,14 +34,20 @@ public class Entrenamiento {
     private LocalDateTime fecha;
 
     @Schema(description = "Distancia recorrida en kilómetros", example = "10.5")
-    private Float distanciaKm;
+    private Float distanciaMetros;
 
     @Schema(description = "Duración del entrenamiento en minutos", example = "50.0")
-    private Float tiempoMin;
+    private Float tiempoSegundos;
 
     @Schema(description = "Ritmo medio en min/km", example = "4.45")
     private Float ritmoMinKm;
 
     @Schema(description = "Notas adicionales del entrenamiento", example = "Rodaje suave por la playa")
     private String notas;
+
+    @Schema(description = "Coordenadas del entrenamiento", example = "38.65121922455728, -0.1238036435097456")
+    private List<Coordinates> coordinatesList;
+
+    @OneToMany(mappedBy = "entrenamiento", cascade = CascadeType.ALL)
+    private List<Lap> laps;
 }

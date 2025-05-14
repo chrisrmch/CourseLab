@@ -33,7 +33,7 @@ public class User implements UserDetails {
 
     @OneToMany(mappedBy = "usuario", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Schema(description = "Entrenamientos realizados por el usuario")
-    private List<Entrenamiento> entrenamientos;
+    private List<Actividad> entrenamientos;
 
     @OneToMany(mappedBy = "usuario", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Schema(description = "Notificaciones recibidas por el usuario")
