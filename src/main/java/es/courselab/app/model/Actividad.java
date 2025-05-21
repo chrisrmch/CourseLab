@@ -45,9 +45,6 @@ public class Actividad {
     @Schema(description = "Notas adicionales del entrenamiento", example = "Rodaje suave por la playa")
     private String notas;
 
-    @Schema(description = "Coordenadas del entrenamiento", example = "38.65121922455728, -0.1238036435097456")
-    private List<Coordinates> coordinatesList;
-
     @OneToMany(mappedBy = "entrenamiento", cascade = CascadeType.ALL)
     private List<Lap> laps;
 }
