@@ -2,9 +2,10 @@ package es.courselab.app.service;
 
 import es.courselab.app.model.User;
 import org.springframework.security.core.userdetails.UserDetails;
+import reactor.core.publisher.Mono;
 
 public interface UserService {
-    UserDetails loadUserByUsername(String username);
+    Mono<UserDetails> loadUserByUsername(String username);
 
-    void saveUser(User account);
+    Mono<User> saveUser(User account);
 }

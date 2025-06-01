@@ -1,14 +1,13 @@
 package es.courselab.app.controller;
 
-
 import es.courselab.app.enumerated.EAccountRole;
 import es.courselab.app.enumerated.EAccountState;
-import es.courselab.app.exception.EmailServiceException;
+import es.courselab.app.handler.NotificationHandler;
 import es.courselab.app.jwt.JwtUtils;
-import es.courselab.app.payload.request.AccountRequestLOGIN;
 import es.courselab.app.model.AccountVerification;
 import es.courselab.app.model.User;
-import es.courselab.app.payload.request.AccountRequestPOST;
+import es.courselab.app.payload.request.AccountRequestLOGIN;
+import es.courselab.app.payload.request.AccountRequestSIGNUP;
 import es.courselab.app.payload.response.JwtResponse;
 import es.courselab.app.payload.response.MessageResponse;
 import es.courselab.app.repository.AccountVerificationRepository;
@@ -17,22 +16,20 @@ import es.courselab.app.service.AccountVerificationServiceImpl;
 import es.courselab.app.service.EmailService;
 import es.courselab.app.service.UserServiceImpl;
 import io.swagger.v3.oas.annotations.Operation;
-import jakarta.mail.MessagingException;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.ReactiveAuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Mono;
 
 import javax.security.auth.login.AccountNotFoundException;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Base64;
 
@@ -42,7 +39,7 @@ import java.util.Base64;
 public class AuthenticationController {
 
     @Autowired
-    private AuthenticationManager authenticationManager;
+    private ReactiveAuthenticationManager reactiveAuthManager;
 
     @Autowired
     private JwtUtils jwtUtils;
@@ -65,87 +62,180 @@ public class AuthenticationController {
     @Autowired
     private AccountVerificationServiceImpl accountVerificationService;
 
+    @Autowired
+    private NotificationHandler notificationHandler;
 
+
+    // ------------------------------------------------------------
+    // ENDPOINT REACTIVO DE LOGIN: /auth/signin
+    // ------------------------------------------------------------
     @Operation(summary = "Inicia sesión con una cuenta de Usuario/Administrador.")
     @PostMapping("/signin")
-    public ResponseEntity<?> authenticateAccount(@Valid @RequestBody AccountRequestLOGIN loginRequest, HttpServletRequest request) {
-        Authentication authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
+    public Mono<ResponseEntity<JwtResponse>> authenticateAccount(
+            @Valid @RequestBody AccountRequestLOGIN loginRequest) {
 
-        SecurityContextHolder.getContext().setAuthentication(authentication);
-        String jwt = jwtUtils.generateJwtToken(authentication);
+        UsernamePasswordAuthenticationToken authenticationToken =
+                new UsernamePasswordAuthenticationToken(
+                        loginRequest.getEmail(),
+                        loginRequest.getPassword()
+                );
 
-        User accountDetails = (User) authentication.getPrincipal();
+        return reactiveAuthManager
+                .authenticate(authenticationToken)
+                .flatMap(authentication -> {
+                    String jwt = jwtUtils.generateJwtToken(authentication);
 
-        String role = accountDetails.getAuthorities().toString().replace("[", "").replace("]", "");
+                    User accountDetails = (User) authentication.getPrincipal();
+                    String role = accountDetails.getAuthorities()
+                            .toString()
+                            .replace("[", "")
+                            .replace("]", "");
 
-        return ResponseEntity.ok(new JwtResponse(jwt, accountDetails.getIdUsuario(), accountDetails.getNombre(), accountDetails.getApellidos(), accountDetails.getUsername(), role));
+                    JwtResponse jwtResponse = new JwtResponse(
+                            jwt,
+                            accountDetails.getUsuarioID(),
+                            accountDetails.getNombre(),
+                            accountDetails.getApellidos(),
+                            accountDetails.getUsername(),
+                            role
+                    );
+
+                    return Mono.just(ResponseEntity.ok(jwtResponse));
+                })
+                .doOnError(Throwable::printStackTrace)
+                .onErrorResume(ex -> Mono.just(
+                        ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                .body(new JwtResponse(
+                                        "",
+                                        null,
+                                        "",
+                                        "",
+                                        "",
+                                        ""
+                                ))
+                ));
     }
 
+
+    // ------------------------------------------------------------
+    // ENDPOINT REACTIVO DE SIGNUP: /auth/signup/user
+    // Ahora integramos el envío de correo de forma reactiva (emailService.sendActivationEmail)
+    // y luego, al completarse todo, emitimos la notificación WebSocket.
+    // ------------------------------------------------------------
     @Operation(summary = "Crea una nueva Cuenta de Usuario.")
     @PostMapping("/signup/user")
-    public ResponseEntity<?> registerUserAccount(@Valid @RequestBody AccountRequestPOST signUpRequest) {
-        if (userRepository.existsByEmail(signUpRequest.getEmail())) {
-            return ResponseEntity.badRequest().body(new MessageResponse("Error: Email is already in use."));
-        }
+    public Mono<ResponseEntity<MessageResponse>> registerUserAccount(
+            @Valid @RequestBody AccountRequestSIGNUP signUpRequest) {
 
-        try {
-            User account = signUpRequestToAccount(signUpRequest, EAccountRole.ROLE_USER, EAccountState.INACTIVE);
-
-            AccountVerification accountVerification = new AccountVerification();
-            accountVerification.setId(Base64.getEncoder().encodeToString(account.getEmail().getBytes()));
-            accountVerification.setEmail(account.getEmail());
-
-            emailService.sendActivationEmail(accountVerification.getId(), accountVerification.getEmail());
-            userService.saveUser(account);
-            accountVerificationRepository.save(accountVerification);
-        } catch (MessagingException e) {
-            System.out.println(e.getMessage());
-            throw new EmailServiceException(e.getMessage());
-        }
-        return ResponseEntity.ok(new MessageResponse("New Account registered."));
+        return userRepository.existsByEmail(signUpRequest.getEmail())
+                .flatMap(exists -> {
+                    if (exists) {
+                        return Mono.just(
+                                ResponseEntity
+                                        .badRequest()
+                                        .body(new MessageResponse("Error: Email is already in use."))
+                        );
+                    }
+                    // 1) Crear la entidad User a partir del DTO
+                    User account = signUpRequestToUserObject(signUpRequest);
+                    // 2) Crear el registro de verificación
+                    AccountVerification verification = new AccountVerification();
+                    verification.setId(Base64.getEncoder()
+                            .encodeToString(account.getEmail().getBytes(StandardCharsets.UTF_8))
+                    );
+                    verification.setEmail(account.getEmail());
+                    // 3) Guardar usuario → guardar verificación → enviar email (reactivo)
+                    return userService.saveUser(account)
+                            .then(
+                                    accountVerificationRepository.save(verification).doOnNext(AccountVerification::setAsAccountVerificationExists)
+                            )
+                            .flatMap(savedAv ->
+                                    // Aquí, en lugar de Mono.fromRunnable(...), usamos emailService.sendActivationEmail
+                                    emailService.sendActivationEmail(savedAv.getId(), savedAv.getEmail())
+                                            .then(Mono.just(
+                                                    ResponseEntity.ok(
+                                                            new MessageResponse("New Account registered.")
+                                                    )
+                                            ))
+                            );
+                })
+                .doOnError(Throwable::printStackTrace)
+                .onErrorResume(ex -> {
+                    String msg = (ex.getCause() instanceof jakarta.mail.MessagingException)
+                            ? "Failed to send activation email."
+                            : "Internal server error.";
+                    return Mono.just(
+                            ResponseEntity
+                                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                                    .body(new MessageResponse(msg))
+                    );
+                })
+                // 4) Cuando todo complete con éxito (200 OK), emitimos la notificación WebSocket
+                .doOnSuccess(responseEntity -> {
+                    if (responseEntity.getStatusCode().is2xxSuccessful()) {
+                        String email = signUpRequest.getEmail();
+                        notificationHandler.publish("Nuevo usuario registrado: " + email);
+                    }
+                });
     }
 
-    private User signUpRequestToAccount(AccountRequestPOST signUpRequest, EAccountRole userRole, EAccountState userState) {
+    private User signUpRequestToUserObject(AccountRequestSIGNUP signUpRequest) {
         User account = new User();
-
-        account.setNombre(signUpRequest.getNombre());
-        account.setApellidos(signUpRequest.getApellidos());
         account.setEmail(signUpRequest.getEmail());
         account.setPassword(encoder.encode(signUpRequest.getPassword()));
-        account.setRole(userRole);
-        account.setEstado(userState);
-        account.setFechaCrecion(LocalDateTime.now());
-
+        account.setRole(EAccountRole.ROLE_USER);
+        account.setEstado(EAccountState.INACTIVE);
+        account.setFechaCreacion(LocalDateTime.now());
         return account;
     }
 
+
+    // ------------------------------------------------------------
+    // ENDPOINT REACTIVO DE ACTIVACIÓN: /auth/activate
+    // ------------------------------------------------------------
     @Operation(summary = "Activa una Cuenta de Usuario.")
     @GetMapping("/activate")
-    public ResponseEntity<?> activateAccount(@RequestParam(name = "token", defaultValue = "") String token, HttpServletRequest request) {
-        try {
-            byte[] decodedBytes = Base64.getDecoder().decode(token);
-            String decodedString = new String(decodedBytes);
+    public Mono<ResponseEntity<String>> activateAccount(
+            @RequestParam(name = "token", defaultValue = "") String token) {
 
-            User account = userRepository.findByEmail(decodedString).orElseThrow(() -> new AccountNotFoundException(decodedString));
-            account.setEstado(EAccountState.ACTIVE);
-
-            AccountVerification accountVerification = accountVerificationRepository.findByEmail(decodedString).orElseThrow(() -> new AccountNotFoundException("Account not found: " + decodedString));
-
-            accountVerificationService.deleteAccountVerificationAndRegisterLog(accountVerification);
-            userRepository.save(account);
-
-            String content = "<header>" + "<h1>Courselab</h1>" + "<h2>Running App</h2>" + "<h4><span>Tu cuenta de usuario </span>" + account.getEmail() + "<span> ha sido activada!</span></h4>" + "</header>";
-
-            HttpHeaders responseHeaders = new HttpHeaders();
-            responseHeaders.setContentType(MediaType.TEXT_HTML);
-
-            return new ResponseEntity<>(content, responseHeaders, HttpStatus.OK);
-        } catch (AccountNotFoundException e) {
-            System.out.println(e.getMessage());
-            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
-        } catch (Exception e) {
-            System.out.println(e.getMessage());
-            return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
-        }
+        return Mono.just(token)
+                .map(t -> {
+                    byte[] decodedBytes = Base64.getDecoder().decode(t);
+                    return new String(decodedBytes, StandardCharsets.UTF_8);
+                })
+                .flatMap(email ->
+                        userRepository.findByEmail(email)
+                                .switchIfEmpty(Mono.error(new AccountNotFoundException(email)))
+                                .flatMap(user -> {
+                                    user.setEstado(EAccountState.ACTIVE);
+                                    return userRepository.save(user);
+                                })
+                                .then(accountVerificationRepository.findByEmail(email)
+                                        .switchIfEmpty(Mono.error(
+                                                new AccountNotFoundException("Account not found: " + email))
+                                        )
+                                )
+                                .flatMap(accountVerificationService::deleteAccountVerificationAndRegisterLog)
+                                .map(ignored -> {
+                                    String content = "<header>"
+                                            + "<h1>Courselab</h1>"
+                                            + "<h2>Running App</h2>"
+                                            + "<h4><span>Tu cuenta de usuario </span>"
+                                            + email
+                                            + "<span> ha sido activada!</span></h4>"
+                                            + "</header>";
+                                    HttpHeaders headers = new HttpHeaders();
+                                    headers.setContentType(MediaType.TEXT_HTML);
+                                    return new ResponseEntity<>(content, headers, HttpStatus.OK);
+                                })
+                ).doOnError(Throwable::printStackTrace)
+                .onErrorResume(AccountNotFoundException.class, ex ->
+                        Mono.just(ResponseEntity.notFound().build())
+                )
+                .onErrorResume(ex ->
+                        Mono.just(ResponseEntity
+                                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                                .build())
+                );
     }
 }

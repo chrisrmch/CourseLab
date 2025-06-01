@@ -1,7 +1,9 @@
 package es.courselab.app.service;
 
 import es.courselab.app.model.AccountVerification;
+import reactor.core.publisher.Mono;
+
 
 public interface AccountVerificationService {
-    void deleteAccountVerificationAndRegisterLog(AccountVerification accountVerification);
+    Mono<Void> deleteAccountVerificationAndRegisterLog(AccountVerification accountVerification);
 }

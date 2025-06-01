@@ -1,25 +1,36 @@
 package es.courselab.app.model;
 
-import jakarta.persistence.*;
-import lombok.*;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.relational.core.mapping.Column;
+import org.springframework.data.relational.core.mapping.Table;
 
-@Entity
+@Table("trackpoint_extension")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-@Table(name = "trackpoint_extension")
 @Schema(description = "Datos extendidos de un trackpoint")
 public class TrackpointExtension {
+
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column("id_trackpoint_extension")
+    @Schema(description = "ID de la extensión de trackpoint", example = "1")
     private Long idTrackpointExtension;
 
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "id_trackpoint", nullable = false)
-    private Trackpoint trackpoint;
+    @Column("id_trackpoint")
+    @Schema(description = "ID del trackpoint al que pertenece esta extensión", example = "42", required = true)
+    private Long trackpointId;
 
+    @Column("speed")
+    @Schema(description = "Velocidad en el punto de seguimiento (m/s)", example = "3.2")
     private Float speed;
+
+    @Column("run_cadence")
+    @Schema(description = "Cadencia de carrera en el punto (pasos por minuto)", example = "85")
     private Integer runCadence;
 }
