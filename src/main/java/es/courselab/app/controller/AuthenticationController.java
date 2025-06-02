@@ -193,49 +193,76 @@ public class AuthenticationController {
     // ------------------------------------------------------------
     // ENDPOINT REACTIVO DE ACTIVACIÓN: /auth/activate
     // ------------------------------------------------------------
-    @Operation(summary = "Activa una Cuenta de Usuario.")
-    @GetMapping("/activate")
+    @GetMapping(value = "/activate", produces = MediaType.TEXT_HTML_VALUE)
     public Mono<ResponseEntity<String>> activateAccount(
             @RequestParam(name = "token", defaultValue = "") String token) {
 
         return Mono.just(token)
+                // Decodifico el token (Base64 -> email)
                 .map(t -> {
                     byte[] decodedBytes = Base64.getDecoder().decode(t);
                     return new String(decodedBytes, StandardCharsets.UTF_8);
                 })
+                // Busco al usuario por email
                 .flatMap(email ->
                         userRepository.findByEmail(email)
                                 .switchIfEmpty(Mono.error(new AccountNotFoundException(email)))
+                                // Marco el usuario como “ACTIVO” en BD
                                 .flatMap(user -> {
                                     user.setEstado(EAccountState.ACTIVE);
+                                    user.setEmailConfirmado(true);
                                     return userRepository.save(user);
                                 })
+                                // Luego busco el registro de verificación por email
                                 .then(accountVerificationRepository.findByEmail(email)
                                         .switchIfEmpty(Mono.error(
                                                 new AccountNotFoundException("Account not found: " + email))
                                         )
                                 )
+                                // Borro ese registro de verificación y anoto en bitácora
                                 .flatMap(accountVerificationService::deleteAccountVerificationAndRegisterLog)
-                                .map(ignored -> {
-                                    String content = "<header>"
-                                            + "<h1>Courselab</h1>"
-                                            + "<h2>Running App</h2>"
-                                            + "<h4><span>Tu cuenta de usuario </span>"
-                                            + email
-                                            + "<span> ha sido activada!</span></h4>"
-                                            + "</header>";
-                                    HttpHeaders headers = new HttpHeaders();
-                                    headers.setContentType(MediaType.TEXT_HTML);
-                                    return new ResponseEntity<>(content, headers, HttpStatus.OK);
-                                })
-                ).doOnError(Throwable::printStackTrace)
+                                // UNA VEZ QUE TODO LO ANTERIOR HAYA CONCLUIDO CORRECTAMENTE:
+                                .then(Mono.defer(() -> {
+                                    // 1) Notifico a todos los clientes WebSocket conectados:
+                                    String mensaje = "✅ La cuenta de " + email + " se ha activado correctamente.";
+                                    notificationHandler.publish(mensaje);
+
+                                    // 2) Devuelvo el HTML al navegador solicitante
+                                    String html = "<!DOCTYPE html>\n" +
+                                            "<html lang=\"es\">\n" +
+                                            "  <head>\n" +
+                                            "    <meta charset=\"UTF-8\" />\n" +
+                                            "    <title>Cuenta Activada</title>\n" +
+                                            "    <style>\n" +
+                                            "      body { font-family: Arial, sans-serif; background: #f5f5f5; text-align: center; padding: 2rem; }\n" +
+                                            "      header { background: #ffffff; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); display: inline-block; padding: 2rem; }\n" +
+                                            "      h1 { margin: 0; font-size: 2rem; color: #333333; }\n" +
+                                            "      h2 { margin: 0.5rem 0 1.5rem; font-size: 1.2rem; color: #666666; }\n" +
+                                            "      h4 { margin-top: 1rem; font-size: 1rem; color: #444444; }\n" +
+                                            "      span { color: #007bff; }\n" +
+                                            "    </style>\n" +
+                                            "  </head>\n" +
+                                            "  <body>\n" +
+                                            "    <header>\n" +
+                                            "      <h1>Courselab</h1>\n" +
+                                            "      <h2>Running App</h2>\n" +
+                                            "      <h4>Tu cuenta de usuario <span>" + email + "</span> ha sido activada!</h4>\n" +
+                                            "    </header>\n" +
+                                            "  </body>\n" +
+                                            "</html>";
+                                    return Mono.just(
+                                            ResponseEntity.ok()
+                                                    .contentType(MediaType.TEXT_HTML)
+                                                    .body(html)
+                                    );
+                                }))
+                )
+                // Si no encuentra account o cualquier otro error, respondo adecuadamente:
                 .onErrorResume(AccountNotFoundException.class, ex ->
                         Mono.just(ResponseEntity.notFound().build())
                 )
                 .onErrorResume(ex ->
-                        Mono.just(ResponseEntity
-                                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                                .build())
+                        Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build())
                 );
     }
 }
