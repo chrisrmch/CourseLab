@@ -4,6 +4,7 @@ package es.courselab.app.controller;
 import es.courselab.app.enumerated.EAccountRole;
 import es.courselab.app.enumerated.EAccountState;
 import es.courselab.app.exception.EmailServiceException;
+import es.courselab.app.exception.UserNotFoundException;
 import es.courselab.app.jwt.JwtUtils;
 import es.courselab.app.payload.request.AccountRequestLOGIN;
 import es.courselab.app.model.AccountVerification;
@@ -11,15 +12,21 @@ import es.courselab.app.model.User;
 import es.courselab.app.payload.request.AccountRequestPOST;
 import es.courselab.app.payload.response.JwtResponse;
 import es.courselab.app.payload.response.MessageResponse;
+import es.courselab.app.payload.response.NotActiveAccount;
 import es.courselab.app.repository.AccountVerificationRepository;
 import es.courselab.app.repository.UserRepository;
 import es.courselab.app.service.AccountVerificationServiceImpl;
 import es.courselab.app.service.EmailService;
 import es.courselab.app.service.UserServiceImpl;
+import io.swagger.v3.core.util.Json;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.mail.MessagingException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jdk.swing.interop.SwingInterOpUtils;
+import lombok.extern.java.Log;
+import lombok.extern.log4j.Log4j;
+import org.aspectj.weaver.ast.Not;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -29,12 +36,15 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import javax.security.auth.login.AccountNotFoundException;
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.logging.Logger;
 
 @CrossOrigin(origins = "*", maxAge = 3600)
 @RestController
@@ -69,16 +79,22 @@ public class AuthenticationController {
     @Operation(summary = "Inicia sesión con una cuenta de Usuario/Administrador.")
     @PostMapping("/signin")
     public ResponseEntity<?> authenticateAccount(@Valid @RequestBody AccountRequestLOGIN loginRequest, HttpServletRequest request) {
-        Authentication authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
+        try {
+            if (!userService.userIsActive(loginRequest.getEmail())) {
+                return new ResponseEntity<>("Todavía no has activado tu cuenta.", HttpStatus.EXPECTATION_FAILED);
+            }
 
-        SecurityContextHolder.getContext().setAuthentication(authentication);
-        String jwt = jwtUtils.generateJwtToken(authentication);
+            Authentication authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+            String jwt = jwtUtils.generateJwtToken(authentication);
+            User accountDetails = (User) authentication.getPrincipal();
+            String role = accountDetails.getAuthorities().toString().replace("[", "").replace("]", "");
 
-        User accountDetails = (User) authentication.getPrincipal();
-
-        String role = accountDetails.getAuthorities().toString().replace("[", "").replace("]", "");
-
-        return ResponseEntity.ok(new JwtResponse(jwt, accountDetails.getIdUsuario(), accountDetails.getNombre(), accountDetails.getApellidos(), accountDetails.getUsername(), role));
+            return ResponseEntity.ok(new JwtResponse(jwt, accountDetails.getIdUsuario(), accountDetails.getNombre(), accountDetails.getApellidos(), accountDetails.getUsername(), role));
+        } catch (UserNotFoundException e) {
+            System.out.println(e.getMessage());
+            return new ResponseEntity<>(e.getMessage(), HttpStatus.NOT_FOUND);
+        }
     }
 
     @Operation(summary = "Crea una nueva Cuenta de Usuario.")
@@ -108,8 +124,6 @@ public class AuthenticationController {
     private User signUpRequestToAccount(AccountRequestPOST signUpRequest, EAccountRole userRole, EAccountState userState) {
         User account = new User();
 
-        account.setNombre(signUpRequest.getNombre());
-        account.setApellidos(signUpRequest.getApellidos());
         account.setEmail(signUpRequest.getEmail());
         account.setPassword(encoder.encode(signUpRequest.getPassword()));
         account.setRole(userRole);
@@ -120,13 +134,14 @@ public class AuthenticationController {
     }
 
     @Operation(summary = "Activa una Cuenta de Usuario.")
-    @GetMapping("/activate")
+    @GetMapping(value = "/activate", produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<?> activateAccount(@RequestParam(name = "token", defaultValue = "") String token, HttpServletRequest request) {
         try {
             byte[] decodedBytes = Base64.getDecoder().decode(token);
             String decodedString = new String(decodedBytes);
 
             User account = userRepository.findByEmail(decodedString).orElseThrow(() -> new AccountNotFoundException(decodedString));
+            account.setEmailConfirmado(true);
             account.setEstado(EAccountState.ACTIVE);
 
             AccountVerification accountVerification = accountVerificationRepository.findByEmail(decodedString).orElseThrow(() -> new AccountNotFoundException("Account not found: " + decodedString));
@@ -134,7 +149,29 @@ public class AuthenticationController {
             accountVerificationService.deleteAccountVerificationAndRegisterLog(accountVerification);
             userRepository.save(account);
 
-            String content = "<header>" + "<h1>Courselab</h1>" + "<h2>Running App</h2>" + "<h4><span>Tu cuenta de usuario </span>" + account.getEmail() + "<span> ha sido activada!</span></h4>" + "</header>";
+            String content =
+                    "<!DOCTYPE html>\n" +
+                            "<html lang=\"es\">\n" +
+                            "  <head>\n" +
+                            "    <meta charset=\"UTF-8\" />\n" +
+                            "    <title>Cuenta Activada</title>\n" +
+                            "    <style>\n" +
+                            "      body { font-family: Arial, sans-serif; background: #f5f5f5; text-align: center; padding: 2rem; }\n" +
+                            "      header { background: #ffffff; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); display: inline-block; padding: 2rem; }\n" +
+                            "      h1 { margin: 0; font-size: 2rem; color: #333333; }\n" +
+                            "      h2 { margin: 0.5rem 0 1.5rem; font-size: 1.2rem; color: #666666; }\n" +
+                            "      h4 { margin-top: 1rem; font-size: 1rem; color: #444444; }\n" +
+                            "      span { color: #007bff; }\n" +
+                            "    </style>\n" +
+                            "  </head>\n" +
+                            "  <body>\n" +
+                            "    <header>\n" +
+                            "      <h1>Courselab</h1>\n" +
+                            "      <h2>Running App</h2>\n" +
+                            "      <h4>Tu cuenta de usuario <span>" + account.getEmail() + "</span> ha sido activada!</h4>\n" +
+                            "    </header>\n" +
+                            "  </body>\n" +
+                            "</html>";
 
             HttpHeaders responseHeaders = new HttpHeaders();
             responseHeaders.setContentType(MediaType.TEXT_HTML);
