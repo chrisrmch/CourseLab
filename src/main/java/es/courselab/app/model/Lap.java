@@ -16,6 +16,9 @@ import java.time.LocalDateTime;
 @Schema(description = "Vuelta o segmento dentro de un entrenamiento")
 public class Lap {
 
+
+
+
     @Id
     @Column("id_lap")
     @Schema(description = "ID de la vuelta", example = "1")
