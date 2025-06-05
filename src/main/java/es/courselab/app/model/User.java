@@ -35,10 +35,6 @@ public class User implements UserDetails {
     @Schema(description = "Entrenamientos realizados por el usuario")
     private List<Actividad> entrenamientos;
 
-    @OneToMany(mappedBy = "usuario", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    @Schema(description = "Notificaciones recibidas por el usuario")
-    private List<Notificacion> notificaciones;
-
     @Schema(description = "Nombre del usuario", example = "Juan", requiredMode = Schema.RequiredMode.REQUIRED)
     private String nombre;
 
@@ -55,7 +51,7 @@ public class User implements UserDetails {
     @Schema(description = "Fecha de nacimiento del usuario", example = "1995-05-15", requiredMode = Schema.RequiredMode.REQUIRED)
     private LocalDateTime fechaNacimiento;
 
-    @Schema(description = "Fecha de nacimiento del usuario", example = "1995-05-15", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "Fecha de creacion del usuario", example = "1995-05-15", requiredMode = Schema.RequiredMode.REQUIRED)
     private LocalDateTime fechaCrecion;
 
     @Schema(description = "Género del usuario", example = "Masculino")
@@ -74,6 +70,8 @@ public class User implements UserDetails {
     @Schema(description = "Estado de la cuenta.", example = "INACTIVE, ACTIVE")
     @Enumerated(value = EnumType.STRING)
     private EAccountState estado;
+
+    private Integer loginSuccesCounter;
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

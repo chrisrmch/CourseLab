@@ -12,21 +12,15 @@ import es.courselab.app.model.User;
 import es.courselab.app.payload.request.AccountRequestPOST;
 import es.courselab.app.payload.response.JwtResponse;
 import es.courselab.app.payload.response.MessageResponse;
-import es.courselab.app.payload.response.NotActiveAccount;
 import es.courselab.app.repository.AccountVerificationRepository;
 import es.courselab.app.repository.UserRepository;
 import es.courselab.app.service.AccountVerificationServiceImpl;
 import es.courselab.app.service.EmailService;
 import es.courselab.app.service.UserServiceImpl;
-import io.swagger.v3.core.util.Json;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.mail.MessagingException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import jdk.swing.interop.SwingInterOpUtils;
-import lombok.extern.java.Log;
-import lombok.extern.log4j.Log4j;
-import org.aspectj.weaver.ast.Not;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -35,16 +29,15 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import javax.security.auth.login.AccountNotFoundException;
 import java.time.LocalDateTime;
 import java.util.Base64;
-import java.util.logging.Logger;
+import java.util.Optional;
 
 @CrossOrigin(origins = "*", maxAge = 3600)
 @RestController
@@ -80,17 +73,32 @@ public class AuthenticationController {
     @PostMapping("/signin")
     public ResponseEntity<?> authenticateAccount(@Valid @RequestBody AccountRequestLOGIN loginRequest, HttpServletRequest request) {
         try {
+            Authentication authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
+
             if (!userService.userIsActive(loginRequest.getEmail())) {
-                return new ResponseEntity<>("Todavía no has activado tu cuenta.", HttpStatus.EXPECTATION_FAILED);
+                return new ResponseEntity<>("Todavía no has activado tu cuenta.", HttpStatus.NOT_ACCEPTABLE);
             }
 
-            Authentication authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
             SecurityContextHolder.getContext().setAuthentication(authentication);
             String jwt = jwtUtils.generateJwtToken(authentication);
             User accountDetails = (User) authentication.getPrincipal();
             String role = accountDetails.getAuthorities().toString().replace("[", "").replace("]", "");
 
-            return ResponseEntity.ok(new JwtResponse(jwt, accountDetails.getIdUsuario(), accountDetails.getNombre(), accountDetails.getApellidos(), accountDetails.getUsername(), role));
+            Optional<User> user = userRepository.findByEmail(loginRequest.getEmail());
+            assert user.isPresent();
+            Integer timesLoggedIn = user.get().getLoginSuccesCounter();
+
+            if (timesLoggedIn == 1) {
+                Integer currentLoginTimes = user.get().getLoginSuccesCounter();
+                user.get().setLoginSuccesCounter(currentLoginTimes + 1);
+                userRepository.save(user.get());
+                return ResponseEntity.ok(new JwtResponse(jwt, accountDetails.getIdUsuario(), accountDetails.getNombre(), true, accountDetails.getApellidos(), accountDetails.getUsername(), role));
+            }
+            Integer currentLoginTimes = user.get().getLoginSuccesCounter();
+            user.get().setLoginSuccesCounter(currentLoginTimes + 1);
+            userRepository.save(user.get());
+
+            return ResponseEntity.ok(new JwtResponse(jwt, accountDetails.getIdUsuario(), accountDetails.getNombre(), false, accountDetails.getApellidos(), accountDetails.getUsername(), role));
         } catch (UserNotFoundException e) {
             System.out.println(e.getMessage());
             return new ResponseEntity<>(e.getMessage(), HttpStatus.NOT_FOUND);
@@ -105,7 +113,7 @@ public class AuthenticationController {
         }
 
         try {
-            User account = signUpRequestToAccount(signUpRequest, EAccountRole.ROLE_USER, EAccountState.INACTIVE);
+            User account = signUpRequestToAccount(signUpRequest);
 
             AccountVerification accountVerification = new AccountVerification();
             accountVerification.setId(Base64.getEncoder().encodeToString(account.getEmail().getBytes()));
@@ -121,13 +129,13 @@ public class AuthenticationController {
         return ResponseEntity.ok(new MessageResponse("New Account registered."));
     }
 
-    private User signUpRequestToAccount(AccountRequestPOST signUpRequest, EAccountRole userRole, EAccountState userState) {
+    private User signUpRequestToAccount(AccountRequestPOST signUpRequest) {
         User account = new User();
 
         account.setEmail(signUpRequest.getEmail());
         account.setPassword(encoder.encode(signUpRequest.getPassword()));
-        account.setRole(userRole);
-        account.setEstado(userState);
+        account.setRole(EAccountRole.ROLE_USER);
+        account.setEstado(EAccountState.INACTIVE);
         account.setFechaCrecion(LocalDateTime.now());
 
         return account;
@@ -142,6 +150,7 @@ public class AuthenticationController {
 
             User account = userRepository.findByEmail(decodedString).orElseThrow(() -> new AccountNotFoundException(decodedString));
             account.setEmailConfirmado(true);
+            account.setLoginSuccesCounter(1);
             account.setEstado(EAccountState.ACTIVE);
 
             AccountVerification accountVerification = accountVerificationRepository.findByEmail(decodedString).orElseThrow(() -> new AccountNotFoundException("Account not found: " + decodedString));
