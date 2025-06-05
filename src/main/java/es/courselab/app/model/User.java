@@ -71,7 +71,7 @@ public class User implements UserDetails {
     @Enumerated(value = EnumType.STRING)
     private EAccountState estado;
 
-    private Integer loginSuccesCounter;
+    private Integer loginSuccesCounter = -1;
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

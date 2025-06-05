@@ -88,12 +88,13 @@ public class AuthenticationController {
             assert user.isPresent();
             Integer timesLoggedIn = user.get().getLoginSuccesCounter();
 
-            if (timesLoggedIn == 1) {
+            if (timesLoggedIn == 0) {
                 Integer currentLoginTimes = user.get().getLoginSuccesCounter();
                 user.get().setLoginSuccesCounter(currentLoginTimes + 1);
                 userRepository.save(user.get());
                 return ResponseEntity.ok(new JwtResponse(jwt, accountDetails.getIdUsuario(), accountDetails.getNombre(), true, accountDetails.getApellidos(), accountDetails.getUsername(), role));
             }
+
             Integer currentLoginTimes = user.get().getLoginSuccesCounter();
             user.get().setLoginSuccesCounter(currentLoginTimes + 1);
             userRepository.save(user.get());
@@ -150,7 +151,7 @@ public class AuthenticationController {
 
             User account = userRepository.findByEmail(decodedString).orElseThrow(() -> new AccountNotFoundException(decodedString));
             account.setEmailConfirmado(true);
-            account.setLoginSuccesCounter(1);
+            account.setLoginSuccesCounter(0);
             account.setEstado(EAccountState.ACTIVE);
 
             AccountVerification accountVerification = accountVerificationRepository.findByEmail(decodedString).orElseThrow(() -> new AccountNotFoundException("Account not found: " + decodedString));
