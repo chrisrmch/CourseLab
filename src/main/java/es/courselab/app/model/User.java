@@ -2,6 +2,7 @@ package es.courselab.app.model;
 
 import es.courselab.app.enumerated.EAccountRole;
 import es.courselab.app.enumerated.EAccountState;
+import es.courselab.app.enumerated.Sex;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.persistence.*;
 import lombok.*;
@@ -54,8 +55,9 @@ public class User implements UserDetails {
     @Schema(description = "Fecha de creacion del usuario", example = "1995-05-15", requiredMode = Schema.RequiredMode.REQUIRED)
     private LocalDateTime fechaCrecion;
 
-    @Schema(description = "Género del usuario", example = "Masculino")
-    private String genero;
+    @Schema(description = "Género del usuario", example = "HOMBRE")
+    @Enumerated(value = EnumType.STRING)
+    private Sex genero;
 
     @Schema(description = "Privilegios/tipo de cuenta.", example = "ROLE_USER, ROLE_ADMIN")
     @Enumerated(value = EnumType.STRING)
